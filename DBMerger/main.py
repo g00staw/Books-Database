@@ -11,7 +11,7 @@ def load_large_csv(filepath, chunksize=100000):
 
 # ---------------------
 # Wczytywanie i czyszczenie books1.csv
-books1 = pd.read_csv("books1.csv", sep=';', engine='python')
+books1 = pd.read_csv("../databases/db1/books.csv", sep=';', engine='python')
 books1.columns = books1.columns.str.strip().str.replace('"', '')
 books1 = books1.rename(columns={
     "ISBN": "isbn",
@@ -22,7 +22,7 @@ books1 = books1.rename(columns={
 })[["isbn", "title", "author", "year_of_publication", "publisher"]]
 
 # Wczytanie ratings1.csv
-ratings1 = pd.read_csv("ratings1.csv", sep=';', engine='python')
+ratings1 = pd.read_csv("../databases/db1/ratings.csv", sep=';', engine='python')
 ratings1.columns = ratings1.columns.str.strip().str.replace('"', '')
 ratings1 = ratings1.rename(columns={"ISBN": "isbn", "Book-Rating": "rating"})
 ratings1["rating"] = pd.to_numeric(ratings1["rating"], errors='coerce')
@@ -32,8 +32,8 @@ ratings1 = ratings1.groupby("isbn")["rating"].mean().reset_index()
 merged1 = pd.merge(books1, ratings1, on="isbn", how="left")
 
 # ---------------------
-# Wczytanie Books_rating2.csv
-books_rating2 = load_large_csv("Books_rating2.csv", chunksize=500000)
+# Wczytanie Books_rating2.csv (duży plik)
+books_rating2 = load_large_csv("../databases/db2/Books_rating.csv", chunksize=500000)
 books_rating2.columns = books_rating2.columns.str.strip()
 books_rating2 = books_rating2.rename(columns={"Id": "isbn", "review/score": "rating_amazon"})
 books_rating2["rating_amazon"] = pd.to_numeric(books_rating2["rating_amazon"], errors='coerce')
@@ -41,7 +41,7 @@ rating_amazon_avg = books_rating2.groupby("isbn")["rating_amazon"].mean().reset_
 
 # ---------------------
 # Wczytanie books_data2.xlsx
-books_data2 = pd.read_excel("books_data2.xlsx")
+books_data2 = pd.read_excel("../databases/db2/books_data.csv")
 books_data2 = books_data2.rename(columns={
     "Title": "title",
     "authors": "author",
@@ -52,7 +52,7 @@ books_data2 = books_data2.rename(columns={
 
 # ---------------------
 # Wczytanie books_data3.csv
-books_data3 = pd.read_csv("books_data3.csv")
+books_data3 = pd.read_csv("../databases/db3/books_data.csv")
 books_data3 = books_data3.rename(columns={
     "title": "title",
     "authors": "author",
