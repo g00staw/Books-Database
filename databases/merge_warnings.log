@@ -1,3 +1,5 @@
 WARNING:root:Error reading large CSV ../databases/db2/ratings.csv: [Errno 2] No such file or directory: '../databases/db2/ratings.csv'
 WARNING:root:Error reading large CSV ../databases/db2/ratings.csv: [Errno 2] No such file or directory: '../databases/db2/ratings.csv'
 WARNING:root:Error reading large CSV ../databases/db2/ratings.csv: [Errno 2] No such file or directory: '../databases/db2/ratings.csv'
+WARNING:root:'title' kolumna nie istnieje w df po merge
+WARNING:root:'title' kolumna nie istnieje w df po merge
