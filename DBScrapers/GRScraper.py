@@ -1,99 +1,147 @@
-import csv
+import numpy as np
 import requests
 from bs4 import BeautifulSoup
+import pandas as pd
 import time
-import re
+import random
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
-# Funkcja pobierająca dane z Goodreads na podstawie ISBN
-def get_book_data(isbn):
+# Funkcja do pobierania danych z Goodreads
+def get_goodreads_data(isbn):
+    print(f"Scraping data for ISBN: {isbn}")  # Logowanie, że rozpoczynamy scraping dla danej książki
+
     url = f"https://www.goodreads.com/book/show/{isbn}"
-    try:
-        response = requests.get(url, timeout=10)
-        if response.status_code != 200:
-            print(f"Błąd pobierania dla ISBN {isbn}: status {response.status_code}")
-            return None
-    except requests.RequestException as e:
-        print(f"Błąd połączenia dla ISBN {isbn}: {e}")
-        return None
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
-    soup = BeautifulSoup(response.text, 'html.parser')
+    # Wykonanie zapytania HTTP
+    response = requests.get(url, headers=headers)
 
-    # Ekstrakcja autorów
-    authors_tags = soup.find_all("a", class_="authorName")
-    authors = ", ".join([tag.text.strip() for tag in authors_tags]) if authors_tags else ""
+    # Logowanie statusu zapytania HTTP
+    print(f"HTTP status for ISBN {isbn}: {response.status_code}")
 
-    # Ekstrakcja oceny z Goodreads
-    rating_tag = soup.find("span", itemprop="ratingValue")
-    rating_goodreads = rating_tag.text.strip() if rating_tag else ""
+    # Jeśli odpowiedź jest OK
+    if response.status_code == 200:
+        print("RESPONSE 200")
+        soup = BeautifulSoup(response.content, "html.parser")
 
-    # Znajdź sekcję szczegółów
-    details = soup.find("div", id="details")
-    language_code = num_pages = publication_date = publisher = ""
-    if details:
-        # Ekstrakcja języka
-        lang_tag = details.find("div", class_="infoBoxRowItem", string=re.compile("Edition Language"))
-        if lang_tag:
-            language_code = lang_tag.find_next_sibling("div").text.strip()
+        # Szukamy pierwszego wyniku książki w wyszukiwarce
+        book = soup.find("a", class_="bookTitle")
+        if book:
+            book_url = "https://www.goodreads.com" + book["href"]
 
-        # Ekstrakcja liczby stron
-        pages_tag = details.find("span", itemprop="numberOfPages")
-        if pages_tag:
-            num_pages = pages_tag.text.strip().split()[0]
+            # Wczytanie strony książki
+            book_response = requests.get(book_url, headers=headers)
+            print(f"Book page HTTP status for ISBN {isbn}: {book_response.status_code}")
 
-        # Ekstrakcja daty publikacji i wydawcy
-        pub_info = details.find("div", string=re.compile("Published"))
-        if pub_info:
-            pub_text = pub_info.text.strip()
-            match = re.search(r"Published\s+(.+?)\s+by\s+(.+)", pub_text)
-            if match:
-                publication_date = match.group(1).strip()
-                publisher = match.group(2).strip()
+            if book_response.status_code == 200:
+                book_soup = BeautifulSoup(book_response.content, "html.parser")
 
-    # Ekstrakcja kategorii (pierwszy gatunek)
-    genre_tags = soup.find_all("a", class_="bookPageGenreLink")
-    category = genre_tags[0].text.strip() if genre_tags else ""
+                # Pobranie danych
+                author = book_soup.find("span", class_="ContributorLink__name").text if book_soup.find("span", class_="ContributorLink__name") else None
+                rating = book_soup.find("div", class_="RatingStatistics__rating").text.strip() if book_soup.find("div", class_="RatingStatistics__rating") else None
+                language = book_soup.find("div", class_="TruncatedContent__text TruncatedContent__text--small",
+                                          tabindex="-1", data_testid="contentContainer").text.strip() if book_soup.find(
+                    "div", class_="TruncatedContent__text TruncatedContent__text--small", tabindex="-1",
+                    data_testid="contentContainer") else None
+                num_pages = \
+                book_soup.find("div", class_="TruncatedContent__text TruncatedContent__text--small", tabindex="-1",
+                               data_testid="contentContainer").text.strip().split(',')[0] if book_soup.find("div",
+                                                                                                            class_="TruncatedContent__text TruncatedContent__text--small",
+                                                                                                            tabindex="-1",
+                                                                                                            data_testid="contentContainer") else None
+                publication_date = book_soup.find("div", class_="TruncatedContent__text TruncatedContent__text--small",
+                                                  tabindex="-1",
+                                                  data_testid="contentContainer").text.strip() if book_soup.find("div",
+                                                                                                                 class_="TruncatedContent__text TruncatedContent__text--small",
+                                                                                                                 tabindex="-1",
+                                                                                                                 data_testid="contentContainer") else None
+                publisher = publication_date.split('by')[1].strip() if publication_date else None
+                category = book_soup.find("span", class_="Button__labelItem").text if book_soup.find("span",
+                                                                                                     class_="Button__labelItem") else None
 
-    return {
-        "authors": authors,
-        "rating_goodreads": rating_goodreads,
-        "language_code": language_code,
-        "num_pages": num_pages,
-        "publication_date": publication_date,
-        "publisher": publisher,
-        "category": category
-    }
+                # Logowanie: Wypisanie danych książki, które udało się scrapować
+                print(f"Scraped data for ISBN {isbn}:")
+                print(f"Author: {author}")
+                print(f"Rating: {rating}")
+                print(f"Language: {language}")
+                print(f"Num Pages: {num_pages}")
+                print(f"Publication Date: {publication_date}")
+                print(f"Publisher: {publisher}")
+                print(f"Category: {category}")
+
+                return {
+                    "isbn": isbn,
+                    "authors": author,
+                    "rating_goodreads": rating,
+                    "language_code": language,
+                    "num_pages": num_pages,
+                    "publication_date": publication_date,
+                    "publisher": publisher,
+                    "category": category
+                }
+    print(f"No data found for ISBN: {isbn}")  # Logowanie, jeśli brak danych
+    return None  # Jeśli książka nie została znaleziona
 
 
-# Ścieżki do plików
-input_file = r"..\databases\bookstest.csv"
-output_file = r"..\databases\bookstest_final_updated.csv"
+# Funkcja do uzupełniania brakujących danych w CSV za pomocą wątków
+def update_books_with_scraper(df):
+    print("Starting to update books with missing data...")
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        # Filtrujemy książki, które mają puste dane w wymaganych kolumnach
+        missing_data_books = df[df['rating_goodreads'].isna() | df['authors'].isna() | df['publication_date'].isna()]
+
+        print(f"Found {len(missing_data_books)} books with missing data. Starting scraping process.")
+
+        # Tworzymy zadania do równoległego wykonania tylko dla książek, które wymagają uzupełnienia danych
+        future_to_isbn = {executor.submit(get_goodreads_data, isbn): isbn for isbn in missing_data_books['isbn']}
+
+        for future in as_completed(future_to_isbn):
+            isbn = future_to_isbn[future]
+            try:
+                # Przed scrapowaniem wyświetlamy dane książki
+                old_data = df.loc[df['isbn'] == isbn]
+                print(f"Before scraping (ISBN: {isbn}):\n{old_data[['isbn', 'title', 'authors', 'rating_goodreads', 'publication_date']]}")
+
+                scraped_data = future.result()
+                if scraped_data:
+                    # Logowanie przed zapisaniem do DataFrame
+                    print(f"Scraping result for ISBN {isbn}: {scraped_data}")
+
+                    # Zaktualizowanie danych w df
+                    df.loc[df['isbn'] == isbn, 'rating_goodreads'] = scraped_data.get("rating_goodreads", np.nan)
+                    df.loc[df['isbn'] == isbn, 'publication_date'] = scraped_data.get("publication_date", np.nan)
+                    df.loc[df['isbn'] == isbn, 'authors'] = scraped_data.get("author", np.nan)
+                    df.loc[df['isbn'] == isbn, 'title'] = scraped_data.get("title", np.nan)
+                    df.loc[df['isbn'] == isbn, 'language_code'] = scraped_data.get("language_code", np.nan)
+                    df.loc[df['isbn'] == isbn, 'num_pages'] = scraped_data.get("num_pages", np.nan)
+                    df.loc[df['isbn'] == isbn, 'publisher'] = scraped_data.get("publisher", np.nan)
+                    df.loc[df['isbn'] == isbn, 'category'] = scraped_data.get("category", np.nan)
+
+                    # Po scrapowaniu wyświetlamy zaktualizowane dane książki
+                    new_data = df.loc[df['isbn'] == isbn]
+                    print(f"After scraping (ISBN: {isbn}):\n{new_data[['isbn', 'title', 'authors', 'rating_goodreads', 'publication_date']]}")
+
+                else:
+                    print(f"No data found for ISBN {isbn}.")
+
+            except Exception as e:
+                print(f"Error processing ISBN {isbn}: {e}")
+
+            # Losowe opóźnienie po każdej operacji
+            time.sleep(random.uniform(1, 2))
+
+    return df
+
 
 # Wczytanie pliku CSV
-with open(input_file, 'r', encoding='utf-8') as f:
-    reader = csv.DictReader(f)
-    books = list(reader)
-    fieldnames = reader.fieldnames  # Zachowaj nagłówki
+csv_path = "../databases/bookstest.csv"
+books_df = pd.read_csv(csv_path)
 
-# Przetwarzanie każdej książki
-for book in books:
-    isbn = book['isbn']
-    print(f"Przetwarzam ISBN: {isbn}")
+# Zaktualizowanie danych za pomocą scrappera
+updated_books_df = update_books_with_scraper(books_df)
 
-    # Pobierz dane tylko jeśli istnieją puste kolumny do uzupełnienia
-    data = get_book_data(isbn)
-    if data:
-        # Uzupełnij tylko puste pola
-        for key in data:
-            if not book[key]:  # Jeśli pole jest puste
-                book[key] = data[key] if data[key] else ""
-
-    time.sleep(2)  # Opóźnienie 2 sekundy między żądaniami
-
-# Zapis do nowego pliku CSV
-with open(output_file, 'w', encoding='utf-8', newline='') as f:
-    writer = csv.DictWriter(f, fieldnames=fieldnames)
-    writer.writeheader()
-    writer.writerows(books)
-
-print(f"Zaktualizowane dane zapisano do {output_file}")
+# Zapisanie zaktualizowanego pliku CSV
+updated_books_df.to_csv("../databases/bookstest_final_updated.csv", index=False)
+print("Zaktualizowano brakujące dane za pomocą scrappera!")
