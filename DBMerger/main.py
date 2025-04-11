@@ -58,11 +58,8 @@ books_with_ratings = pd.merge(books1_filtered, ratings, on="isbn", how="left")
 books_with_ratings["rating_amazon"] = books_with_ratings["rating"].fillna(books_with_ratings["rating"].mean())
 
 # ---------------------
-# 4. Wczytanie db2/books.csv i połączenie tytułów
+# 4. Wczytanie db2/books.csv i połączenie tytułów i kategorii
 books_data2 = safe_read_csv("../databases/db2/books.csv", encoding='ISO-8859-1', engine='c', on_bad_lines='skip')
-
-# Sprawdzamy dostępne kolumny w db2/books.csv
-print(books_data2.columns)  # Tylko do sprawdzenia kolumn
 
 # Łączenie 'title' i 'subtitle' w jedną kolumnę 'title'
 if 'title' in books_data2.columns and 'subtitle' in books_data2.columns:
@@ -71,7 +68,7 @@ else:
     logging.warning("Brak jednej z kolumn 'title' lub 'subtitle' w db2/books.csv.")
 
 # Wybieramy tylko potrzebne kolumny
-required_columns_db2 = ["isbn10", "title", "authors", "num_pages", "average_rating"]
+required_columns_db2 = ["isbn10", "title", "authors", "num_pages", "average_rating", "categories"]
 books_data2 = books_data2[required_columns_db2]
 
 # Zmieniamy nazwę kolumny 'isbn10' na 'isbn'
@@ -81,9 +78,15 @@ books_data2 = books_data2.rename(columns={"isbn10": "isbn", "average_rating": "r
 if 'publisher' not in books_data2.columns:
     books_data2['publisher'] = np.nan  # Dodajemy pustą kolumnę, jeśli jej brak
 
+# Dodanie kolumny 'category' (pierwsza kategoria z 'categories')
+if 'categories' in books_data2.columns:
+    books_data2['category'] = books_data2['categories'].str.split(",").str[0]  # Bierzemy tylko pierwszą kategorię
+else:
+    logging.warning("Brak kolumny 'categories' w db2/books.csv.")
+
 # ---------------------
 # 5. Dodanie brakujących kolumn do wszystkich danych
-required_columns = ["isbn", "title", "authors", "rating_goodreads", "language_code", "num_pages", "publication_date", "publisher", "rating_amazon", "rating_google"]
+required_columns = ["isbn", "title", "authors", "rating_goodreads", "language_code", "num_pages", "publication_date", "publisher", "rating_amazon", "rating_google", "category"]
 
 # Uzupełniamy brakujące kolumny w każdej z baz danych
 books_data3 = add_missing_columns(books_data3, required_columns)
@@ -98,11 +101,14 @@ final_books = pd.concat([books_data3, books_with_ratings, books_data2], ignore_i
 final_books = final_books.drop_duplicates(subset="isbn", keep="first")
 
 # Finalne kolumny, dopasowanie do docelowej struktury
-final_books = final_books[["isbn", "title", "authors", "rating_goodreads", "language_code", "num_pages", "publication_date", "publisher", "rating_amazon", "rating_google"]]
+final_books = final_books[["isbn", "title", "authors", "rating_goodreads", "language_code", "num_pages", "publication_date", "publisher", "rating_amazon", "rating_google", "category"]]
 
 # Uzupełnienie brakujących danych (np. brakujących kolumn w db2)
 final_books["rating_amazon"] = final_books["rating_amazon"].fillna(final_books["rating_amazon"].mean())
 final_books["rating_google"] = final_books["rating_google"].fillna(final_books["rating_google"].mean())
+
+final_books["rating_amazon"] = final_books["rating_amazon"].round(2)
+final_books["rating_google"] = final_books["rating_google"].round(2)
 
 # ---------------------
 # 7. Zapis do pliku CSV
