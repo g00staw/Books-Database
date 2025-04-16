@@ -11,7 +11,7 @@ import re
 
 # Funkcja do pobrania i parsowania strony książki na Goodreads (używając Selenium)
 def get_book_details(isbn):
-    url = f'https://www.goodreads.com/book/show/{isbn}'
+    url = f'https://www.goodreads.com/search?q={isbn}'
 
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()))
     driver.get(url)
@@ -83,7 +83,9 @@ df = pd.read_csv('../databases/bookstest.csv')
 
 # Funkcja do uzupełniania brakujących danych i wypisania wyników na terminalu
 def fill_missing_data(row):
-    isbn = str(row['isbn'])
+    # Upewnij się, że ISBN jest traktowane jako ciąg znaków, w tym początkowe 0
+    isbn = str(row['isbn']).zfill(10)  # ISBN jest teraz ciągiem znaków, zachowujemy początkowe zera
+    print(f"Pobieranie danych dla ISBN: {isbn}")
     book_details = get_book_details(isbn)
 
     # Uzupełnianie brakujących danych w kolumnach
@@ -114,6 +116,13 @@ def fill_missing_data(row):
     print(f"Category: {row['category']}")
     print("=" * 50)
 
+    return row
 
-# Iteracja po każdym wierszu w pliku CSV i wypisanie danych na terminalu
-df.apply(fill_missing_data, axis=1)
+
+# Uzupełnianie danych w całym DataFrame
+df = df.apply(fill_missing_data, axis=1)
+
+# Zapisanie wyników do nowego pliku CSV
+df.to_csv('../databases/bookstest_final_updated.csv', index=False)
+
+print("Dane zostały zapisane do pliku 'books_updated.csv'.")
