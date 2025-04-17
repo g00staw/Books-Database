@@ -11,12 +11,12 @@ import re
 
 # Funkcja do pobrania i parsowania strony książki na Goodreads (używając Selenium)
 def get_book_details(isbn):
-    url = f'https://www.goodreads.com/search?q={isbn}'
+    url = f'https://www.goodreads.com/search?q={isbn}'  # Poprawny URL dla książki na Goodreads
 
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()))
     driver.get(url)
 
-    # Czekaj na załadowanie strony i zamknięcie pop-upu
+    # Czekaj na załadowanie strony
     time.sleep(3)
 
     try:
@@ -28,7 +28,15 @@ def get_book_details(isbn):
     except:
         print("Pop-up nie został zamknięty.")
 
-    # Pobierz HTML strony po załadowaniu
+    # Kliknij przycisk rozwijający szczegóły książki, aby załadować dodatkowe dane
+    try:
+        details_button = driver.find_element(By.CSS_SELECTOR, "button[aria-label='Book details and editions']")
+        details_button.click()
+        time.sleep(2)  # Poczekaj, aż szczegóły się załadują
+    except:
+        print("Nie udało się kliknąć przycisku 'Book details & editions'.")
+
+    # Pobierz HTML strony po załadowaniu szczegółów
     soup = BeautifulSoup(driver.page_source, 'html.parser')
 
     book_details = {}
@@ -69,7 +77,8 @@ def get_book_details(isbn):
 
     # Pobierz język
     try:
-        book_details['language_code'] = soup.select_one("div.TruncatedContent__text").text.strip()
+        language_tag = soup.select_one("dt:contains('Language') + dd div.TruncatedContent__text")
+        book_details['language_code'] = language_tag.text.strip() if language_tag else None
     except AttributeError:
         book_details['language_code'] = None
 
@@ -78,7 +87,7 @@ def get_book_details(isbn):
 
 
 # Wczytanie pliku CSV
-df = pd.read_csv('../databases/bookstest.csv')
+df = pd.read_csv('../databases/bookstest.csv', dtype={'isbn': str})  # Upewniamy się, że ISBN jest traktowane jako string
 
 
 # Funkcja do uzupełniania brakujących danych i wypisania wyników na terminalu
@@ -122,7 +131,8 @@ def fill_missing_data(row):
 # Uzupełnianie danych w całym DataFrame
 df = df.apply(fill_missing_data, axis=1)
 
-# Zapisanie wyników do nowego pliku CSV
+# Zapisanie wyników do nowego pliku CSV (upewniamy się, że ISBN jest traktowane jako string)
+df['isbn'] = df['isbn'].astype(str)  # Zapisujemy ISBN jako ciąg znaków, żeby zachować zera
 df.to_csv('../databases/bookstest_final_updated.csv', index=False)
 
-print("Dane zostały zapisane do pliku 'books_updated.csv'.")
+print("Dane zostały zapisane do pliku 'bookstest_final_updated.csv'.")
