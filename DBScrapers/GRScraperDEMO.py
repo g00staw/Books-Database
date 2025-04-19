@@ -17,7 +17,7 @@ def get_book_details(isbn):
     driver.get(url)
 
     # Czekaj na załadowanie strony
-    time.sleep(3)
+    time.sleep(1)
 
     try:
         # Zamknij pop-up
@@ -63,15 +63,25 @@ def get_book_details(isbn):
 
     # Pobierz liczbę stron
     try:
-        book_details['num_pages'] = soup.select_one('p[data-testid="pagesFormat"]').text.strip().split()[0]
+        num_pages_text = soup.select_one('p[data-testid="pagesFormat"]').text.strip().split()[0]
+        # Sprawdzamy, czy liczba stron jest poprawną liczbą całkowitą
+        try:
+            book_details['num_pages'] = int(num_pages_text)
+        except ValueError:
+            book_details['num_pages'] = None  # Jeśli nie można sparsować, ustawiamy NaN lub None
     except AttributeError:
         book_details['num_pages'] = None
 
     # Pobierz datę publikacji i wydawnictwo
     try:
-        publication_info = soup.select_one('p[data-testid="publicationInfo"]').text.strip().split("by")
-        book_details['publication_date'] = publication_info[0].strip()
-        book_details['publisher'] = publication_info[-1].strip() if len(publication_info) > 1 else None
+        publication_info = soup.select_one('p[data-testid="publicationInfo"]').text.strip()
+
+        # Używamy wyrażenia regularnego do usunięcia słów przed datą, np. "First published" lub "Published"
+        publication_date = re.sub(r'^(First published|Published)\s+', '', publication_info)
+
+        # Zapisujemy samą datę
+        book_details['publication_date'] = publication_date.strip()
+        book_details['publisher'] = publication_info.split('by')[-1].strip() if 'by' in publication_info else None
     except AttributeError:
         book_details['publication_date'] = book_details['publisher'] = None
 
