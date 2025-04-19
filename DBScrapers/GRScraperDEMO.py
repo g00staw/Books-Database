@@ -66,7 +66,7 @@ def get_book_details(isbn):
         num_pages_text = soup.select_one('p[data-testid="pagesFormat"]').text.strip().split()[0]
         # Sprawdzamy, czy liczba stron jest poprawną liczbą całkowitą
         try:
-            book_details['num_pages'] = int(num_pages_text)
+            book_details['num_pages'] = int(float(num_pages_text))  # Konwertujemy na int
         except ValueError:
             book_details['num_pages'] = None  # Jeśli nie można sparsować, ustawiamy NaN lub None
     except AttributeError:
@@ -79,8 +79,14 @@ def get_book_details(isbn):
         # Używamy wyrażenia regularnego do usunięcia słów przed datą, np. "First published" lub "Published"
         publication_date = re.sub(r'^(First published|Published)\s+', '', publication_info)
 
-        # Zapisujemy samą datę
-        book_details['publication_date'] = publication_date.strip()
+        # Pobieramy tylko rok z daty publikacji (np. "2002")
+        year_match = re.search(r'\b\d{4}\b', publication_date)
+        if year_match:
+            book_details['publication_date'] = int(year_match.group())  # Przekształcamy rok na int
+        else:
+            book_details['publication_date'] = None
+
+        # Wydawnictwo
         book_details['publisher'] = publication_info.split('by')[-1].strip() if 'by' in publication_info else None
     except AttributeError:
         book_details['publication_date'] = book_details['publisher'] = None
@@ -141,8 +147,18 @@ def fill_missing_data(row):
 # Uzupełnianie danych w całym DataFrame
 df = df.apply(fill_missing_data, axis=1)
 
-# Zapisanie wyników do nowego pliku CSV (upewniamy się, że ISBN jest traktowane jako string)
-df['isbn'] = df['isbn'].astype(str)  # Zapisujemy ISBN jako ciąg znaków, żeby zachować zera
+# Konwersja do liczb, z NaN jeśli nie parsowalne
+df['publication_date'] = pd.to_numeric(df['publication_date'], errors='coerce')
+df['num_pages'] = pd.to_numeric(df['num_pages'], errors='coerce')
+
+# Konwersja do typu Int64 (nullable int), żeby nie było .0 w CSV
+df['publication_date'] = df['publication_date'].astype('Int64')
+df['num_pages'] = df['num_pages'].astype('Int64')
+
+# ISBN jako string (dla zer z przodu)
+df['isbn'] = df['isbn'].astype(str)
+
+# Zapis do pliku CSV
 df.to_csv('../databases/bookstest_final_updated.csv', index=False)
 
 print("Dane zostały zapisane do pliku 'bookstest_final_updated.csv'.")

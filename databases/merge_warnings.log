@@ -3,3 +3,5 @@ WARNING:root:Error reading large CSV ../databases/db2/ratings.csv: [Errno 2] No 
 WARNING:root:Error reading large CSV ../databases/db2/ratings.csv: [Errno 2] No such file or directory: '../databases/db2/ratings.csv'
 WARNING:root:'title' kolumna nie istnieje w df po merge
 WARNING:root:'title' kolumna nie istnieje w df po merge
+WARNING:root:Error reading ../databases/db1/books.csv: 'utf-8' codec can't decode byte 0xc3 in position 26: invalid continuation byte
+WARNING:root:Error reading ../databases/db1/ratings.csv: 'utf-8' codec can't decode byte 0xba in position 10: invalid start byte
