@@ -94,9 +94,9 @@ def get_book_details(isbn):
     # Pobierz język
     try:
         language_tag = soup.select_one("dt:contains('Language') + dd div.TruncatedContent__text")
-        book_details['language_code'] = language_tag.text.strip() if language_tag else None
+        book_details['language'] = language_tag.text.strip() if language_tag else None
     except AttributeError:
-        book_details['language_code'] = None
+        book_details['language'] = None
 
     driver.quit()
     return book_details
@@ -118,8 +118,8 @@ def fill_missing_data(row):
         row['authors'] = book_details['authors']
     if pd.isna(row['rating_goodreads']) and book_details['rating_goodreads']:
         row['rating_goodreads'] = book_details['rating_goodreads']
-    if pd.isna(row['language_code']) and book_details['language_code']:
-        row['language_code'] = book_details['language_code']
+    if pd.isna(row['language']) and book_details['language']:
+        row['language'] = book_details['language']
     if pd.isna(row['num_pages']) and book_details['num_pages']:
         row['num_pages'] = book_details['num_pages']
     if pd.isna(row['publication_date']) and book_details['publication_date']:
@@ -134,7 +134,7 @@ def fill_missing_data(row):
     print(f"Title: {row['title']}")
     print(f"Authors: {row['authors']}")
     print(f"Goodreads Rating: {row['rating_goodreads']}")
-    print(f"Language: {row['language_code']}")
+    print(f"Language: {row['language']}")
     print(f"Number of Pages: {row['num_pages']}")
     print(f"Publication Date: {row['publication_date']}")
     print(f"Publisher: {row['publisher']}")
