@@ -1,114 +1,157 @@
-from neo4j import GraphDatabase
 import pandas as pd
-import numpy as np
-import re
-
-# Łączenie z bazą danych Neo4j
-uri = "bolt://localhost:7687"  # Neo4j lokalnie
-username = "neo4j"  # Domyślny użytkownik Neo4j
-password = "password"  # Hasło do Neo4j (zmień w razie potrzeby)
-
-# Połączenie z Neo4j
-driver = GraphDatabase.driver(uri, auth=(username, password))
-session = driver.session()
-
-# Funkcja do tworzenia węzła w bazie Neo4j
-def create_book_node(tx, isbn, title, num_pages, publication_date, rating_goodreads):
-    query = (
-        f"CREATE (b:Book {{isbn: '{isbn}', title: '{title}', num_pages: {num_pages}, "
-        f"publication_date: {publication_date}, rating_goodreads: {rating_goodreads}}})"
-    )
-    tx.run(query)
-
-def create_author_node(tx, author_name):
-    query = f"MERGE (a:Author {{name: '{author_name}'}})"
-    tx.run(query)
-
-def create_genre_node(tx, genre_name):
-    query = f"MERGE (g:Genre {{name: '{genre_name}'}})"
-    tx.run(query)
-
-def create_publisher_node(tx, publisher_name):
-    query = f"MERGE (p:Publisher {{name: '{publisher_name}'}})"
-    tx.run(query)
-
-def create_language_node(tx, language_name):
-    query = f"MERGE (l:Language {{name: '{language_name}'}})"
-    tx.run(query)
-
-def create_year_node(tx, year):
-    query = f"MERGE (y:Year {{year: {year}}})"
-    tx.run(query)
-
-# Funkcja do tworzenia relacji między węzłami
-def create_relationships(tx, isbn, authors, genre, publisher, language, publication_date):
-    # Relacje między książką a autorem
-    for author in authors.split(','):
-        author_name = author.strip()
-        tx.run(f"MATCH (b:Book {{isbn: '{isbn}'}}), (a:Author {{name: '{author_name}'}}) "
-               "MERGE (b)-[:AUTHORED_BY]->(a)")  # MERGE zamiast CREATE
-
-    # Relacja między książką a gatunkiem
-    tx.run(f"MATCH (b:Book {{isbn: '{isbn}'}}), (g:Genre {{name: '{genre}'}}) "
-           "MERGE (b)-[:BELONGS_TO_GENRE]->(g)")  # MERGE zamiast CREATE
-
-    # Relacja między książką a wydawnictwem
-    tx.run(f"MATCH (b:Book {{isbn: '{isbn}'}}), (p:Publisher {{name: '{publisher}'}}) "
-           "MERGE (b)-[:PUBLISHED_BY]->(p)")  # MERGE zamiast CREATE
-
-    # Relacja między książką a językiem
-    tx.run(f"MATCH (b:Book {{isbn: '{isbn}'}}), (l:Language {{name: '{language}'}}) "
-           "MERGE (b)-[:HAS_LANGUAGE]->(l)")  # MERGE zamiast CREATE
-
-    # Relacja między książką a rokiem wydania
-    tx.run(f"MATCH (b:Book {{isbn: '{isbn}'}}), (y:Year {{year: {publication_date}}}) "
-           "MERGE (b)-[:PUBLISHED_IN]->(y)")  # MERGE zamiast CREATE
+from neo4j import GraphDatabase
 
 
-# Wczytanie pliku CSV
-df = pd.read_csv('../databases/bookstest_final_updated.csv',
-                 dtype={'isbn': str})  # Upewniamy się, że ISBN jest traktowane jako string
+class Neo4jBooksImporter:
+    def __init__(self, uri, username, password):
+        self.driver = GraphDatabase.driver(uri, auth=(username, password))
 
-# Przetworzenie danych w celu zapewnienia odpowiedniego formatu
-df['title'] = df['title'].apply(lambda x: f'"{x}"' if not x.startswith('"') else x)  # Tytuł w cudzysłowie
-df['authors'] = df['authors'].apply(
-    lambda x: ', '.join([author.strip() for author in x.split(',')]))  # Ujednolicenie autorów
-df['publication_date'] = pd.to_numeric(df['publication_date'], errors='coerce')  # Rok wydania na int
-df['num_pages'] = pd.to_numeric(df['num_pages'], errors='coerce')  # Liczba stron na int
+    def close(self):
+        self.driver.close()
 
-# Debugowanie: Sprawdzamy, ile książek jest w pliku
-print(f"Liczba książek w pliku CSV: {len(df)}")
+    def import_books(self, csv_file):
+        # Read CSV file
+        df = pd.read_csv(csv_file)
 
-# Przekształcenie danych i import do Neo4j dla każdej książki w pliku
-for index, row in df.iterrows():
-    isbn = row['isbn']
-    title = row['title']
-    num_pages = row['num_pages'] if pd.notna(row['num_pages']) else 0  # 0 jeśli brak
-    publication_date = int(row['publication_date']) if pd.notna(row['publication_date']) else 0  # 0 jeśli brak
-    rating_goodreads = row['rating_goodreads'] if pd.notna(row['rating_goodreads']) else 0.0
-    authors = row['authors']
+        # Clean up and process each book
+        with self.driver.session() as session:
+            # Create constraints for unique nodes (if they don't exist)
+            self._create_constraints(session)
 
-    # Sprawdzamy, czy wartość w kolumnie 'category' jest NaN (brakująca)
-    category = row['category'] if pd.notna(row['category']) else ""  # Jeśli NaN, przypisujemy pusty ciąg
-    genre = category.split(',')[0]  # Bierzemy pierwszy gatunek
+            # Process each book row
+            for _, row in df.iterrows():
+                self._process_book(session, row)
 
-    publisher = row['publisher']
-    language = row['language']
+        print(f"Imported {len(df)} books into Neo4j")
 
-    with session.begin_transaction() as tx:
-        # Tworzymy węzły
-        create_book_node(tx, isbn, title, num_pages, publication_date, rating_goodreads)
-        create_genre_node(tx, genre)
-        create_publisher_node(tx, publisher)
-        create_language_node(tx, language)
-        create_year_node(tx, publication_date)
+    def _create_constraints(self, session):
+        # Create constraints to ensure uniqueness
+        constraints = [
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (b:Book) REQUIRE b.isbn IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (a:Author) REQUIRE a.name IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (p:Publisher) REQUIRE p.name IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (y:Year) REQUIRE y.year IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (l:Language) REQUIRE l.name IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (g:Genre) REQUIRE g.name IS UNIQUE"
+        ]
 
-        # Tworzymy relacje
-        create_relationships(tx, isbn, authors, genre, publisher, language, publication_date)
+        for constraint in constraints:
+            try:
+                session.run(constraint)
+            except Exception as e:
+                print(f"Constraint creation issue: {e}")
 
-    # Debugowanie: Sprawdzamy postęp
-    print(f"Zaimportowano książkę: {title} ({isbn})")
+    def _process_book(self, session, row):
+        # Extract data from row
+        isbn = str(row['isbn'])
+        title = row['title']
 
-# Zamykanie sesji
-session.close()
-print("Dane zostały zaimportowane do Neo4j.")
+        # Handle potential missing/NaN values
+        publisher = row.get('publisher', '')
+        if pd.isna(publisher):
+            publisher = 'Unknown'
+
+        # Handle publication year
+        pub_date = row.get('publication_date', '')
+        if pd.isna(pub_date):
+            year = 'Unknown'
+        else:
+            year = str(pub_date)
+
+        # Handle language
+        language = row.get('language', '')
+        if pd.isna(language):
+            language = 'Unknown'
+
+        # Create Book node
+        book_query = """
+        MERGE (b:Book {isbn: $isbn})
+        SET b.title = $title
+        RETURN b
+        """
+        session.run(book_query, isbn=isbn, title=title)
+
+        # Create Publisher node and relationship
+        if publisher and publisher != 'Unknown':
+            publisher_query = """
+            MERGE (p:Publisher {name: $publisher})
+            WITH p
+            MATCH (b:Book {isbn: $isbn})
+            MERGE (b)-[:PUBLISHED_BY]->(p)
+            """
+            session.run(publisher_query, publisher=publisher, isbn=isbn)
+
+        # Create Year node and relationship
+        if year and year != 'Unknown':
+            year_query = """
+            MERGE (y:Year {year: $year})
+            WITH y
+            MATCH (b:Book {isbn: $isbn})
+            MERGE (b)-[:PUBLISHED_IN]->(y)
+            """
+            session.run(year_query, year=year, isbn=isbn)
+
+        # Create Language node and relationship
+        if language and language != 'Unknown':
+            language_query = """
+            MERGE (l:Language {name: $language})
+            WITH l
+            MATCH (b:Book {isbn: $isbn})
+            MERGE (b)-[:WRITTEN_IN]->(l)
+            """
+            session.run(language_query, language=language, isbn=isbn)
+
+        # Process authors - FIXED to handle multiple authors correctly
+        authors_raw = row.get('authors', '')
+        if not pd.isna(authors_raw):
+            # Parse authors properly
+            if authors_raw.startswith('"') and authors_raw.endswith('"'):
+                # This is a quoted string with multiple authors
+                authors_content = authors_raw[1:-1]  # Remove outer quotes
+            else:
+                # Single author or already processed string
+                authors_content = authors_raw
+
+            # Split by comma and handle each author individually
+            author_list = [a.strip() for a in authors_content.split(',')]
+
+            for author in author_list:
+                if author:  # Ensure we don't add empty authors
+                    author_query = """
+                    MERGE (a:Author {name: $author})
+                    WITH a
+                    MATCH (b:Book {isbn: $isbn})
+                    MERGE (b)-[:WRITTEN_BY]->(a)
+                    """
+                    session.run(author_query, author=author, isbn=isbn)
+
+        # Process genres/categories - FIXED to handle properly
+        categories = row.get('category', '')
+        if not pd.isna(categories):
+            # Split categories by comma
+            genre_list = [g.strip() for g in categories.split(',')]
+
+            for genre in genre_list:
+                if genre:  # Ensure we don't add empty genres
+                    genre_query = """
+                    MERGE (g:Genre {name: $genre})
+                    WITH g
+                    MATCH (b:Book {isbn: $isbn})
+                    MERGE (b)-[:BELONGS_TO]->(g)
+                    """
+                    session.run(genre_query, genre=genre, isbn=isbn)
+
+
+# Usage example
+if __name__ == "__main__":
+    # Replace with your Neo4j connection details
+    uri = "neo4j://localhost:7687"
+    username = "neo4j"
+    password = "password"
+
+    importer = Neo4jBooksImporter(uri, username, password)
+
+    try:
+        importer.import_books("bookstest_final_updated.csv")
+    finally:
+        importer.close()
