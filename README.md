@@ -199,6 +199,14 @@ python DBCreator.py
   - webdriver-manager
   - requests
 
+## Źródła plików csv
+ - db1/books.csv   (https://www.kaggle.com/datasets/saurabhbagchi/books-dataset)
+ - db1/ratings.csv
+
+ - db2/books.csv   (https://www.kaggle.com/datasets/dylanjcastillo/7k-books-with-metadata)
+
+ - db3/books.csv   (https://www.kaggle.com/datasets/jealousleopard/goodreadsbooks)
+
 ## Najczęstsze problemy
 
 1. **Problem z połączeniem do Neo4j**
