@@ -1,147 +1,164 @@
-import numpy as np
+import time
 import requests
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
 import pandas as pd
-import time
-import random
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import re
 
 
-# Funkcja do pobierania danych z Goodreads
-def get_goodreads_data(isbn):
-    print(f"Scraping data for ISBN: {isbn}")  # Logowanie, że rozpoczynamy scraping dla danej książki
+# Funkcja do pobrania i parsowania strony książki na Goodreads (używając Selenium)
+def get_book_details(isbn):
+    url = f'https://www.goodreads.com/search?q={isbn}'  # Poprawny URL dla książki na Goodreads
 
-    url = f"https://www.goodreads.com/book/show/{isbn}"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()))
+    driver.get(url)
 
-    # Wykonanie zapytania HTTP
-    response = requests.get(url, headers=headers)
+    # Czekaj na załadowanie strony
+    time.sleep(1)
 
-    # Logowanie statusu zapytania HTTP
-    print(f"HTTP status for ISBN {isbn}: {response.status_code}")
+    try:
+        # Zamknij pop-up
+        close_button = driver.find_element(By.CSS_SELECTOR,
+                                           "button.Button--tertiary.Button--medium.Button--rounded[aria-label='Close']")
+        close_button.click()
+        time.sleep(1)
+    except:
+        print("Pop-up nie został zamknięty.")
 
-    # Jeśli odpowiedź jest OK
-    if response.status_code == 200:
-        print("RESPONSE 200")
-        soup = BeautifulSoup(response.content, "html.parser")
+    # Kliknij przycisk rozwijający szczegóły książki, aby załadować dodatkowe dane
+    try:
+        details_button = driver.find_element(By.CSS_SELECTOR, "button[aria-label='Book details and editions']")
+        details_button.click()
+        time.sleep(2)  # Poczekaj, aż szczegóły się załadują
+    except:
+        print("Nie udało się kliknąć przycisku 'Book details & editions'.")
 
-        # Szukamy pierwszego wyniku książki w wyszukiwarce
-        book = soup.find("a", class_="bookTitle")
-        if book:
-            book_url = "https://www.goodreads.com" + book["href"]
+    # Pobierz HTML strony po załadowaniu szczegółów
+    soup = BeautifulSoup(driver.page_source, 'html.parser')
 
-            # Wczytanie strony książki
-            book_response = requests.get(book_url, headers=headers)
-            print(f"Book page HTTP status for ISBN {isbn}: {book_response.status_code}")
+    book_details = {}
 
-            if book_response.status_code == 200:
-                book_soup = BeautifulSoup(book_response.content, "html.parser")
+    # Pobierz ocenę Goodreads
+    try:
+        book_details['rating_goodreads'] = soup.select_one("div.RatingStatistics__rating").text.strip()
+    except AttributeError:
+        book_details['rating_goodreads'] = None
 
-                # Pobranie danych
-                author = book_soup.find("span", class_="ContributorLink__name").text if book_soup.find("span", class_="ContributorLink__name") else None
-                rating = book_soup.find("div", class_="RatingStatistics__rating").text.strip() if book_soup.find("div", class_="RatingStatistics__rating") else None
-                language = book_soup.find("div", class_="TruncatedContent__text TruncatedContent__text--small",
-                                          tabindex="-1", data_testid="contentContainer").text.strip() if book_soup.find(
-                    "div", class_="TruncatedContent__text TruncatedContent__text--small", tabindex="-1",
-                    data_testid="contentContainer") else None
-                num_pages = \
-                book_soup.find("div", class_="TruncatedContent__text TruncatedContent__text--small", tabindex="-1",
-                               data_testid="contentContainer").text.strip().split(',')[0] if book_soup.find("div",
-                                                                                                            class_="TruncatedContent__text TruncatedContent__text--small",
-                                                                                                            tabindex="-1",
-                                                                                                            data_testid="contentContainer") else None
-                publication_date = book_soup.find("div", class_="TruncatedContent__text TruncatedContent__text--small",
-                                                  tabindex="-1",
-                                                  data_testid="contentContainer").text.strip() if book_soup.find("div",
-                                                                                                                 class_="TruncatedContent__text TruncatedContent__text--small",
-                                                                                                                 tabindex="-1",
-                                                                                                                 data_testid="contentContainer") else None
-                publisher = publication_date.split('by')[1].strip() if publication_date else None
-                category = book_soup.find("span", class_="Button__labelItem").text if book_soup.find("span",
-                                                                                                     class_="Button__labelItem") else None
+    # Pobierz autorów
+    try:
+        authors = soup.select("span.ContributorLink__name")
+        book_details['authors'] = ', '.join([author.text.strip() for author in authors])
+    except AttributeError:
+        book_details['authors'] = None
 
-                # Logowanie: Wypisanie danych książki, które udało się scrapować
-                print(f"Scraped data for ISBN {isbn}:")
-                print(f"Author: {author}")
-                print(f"Rating: {rating}")
-                print(f"Language: {language}")
-                print(f"Num Pages: {num_pages}")
-                print(f"Publication Date: {publication_date}")
-                print(f"Publisher: {publisher}")
-                print(f"Category: {category}")
+    # Pobierz kategorię
+    try:
+        categories = soup.select("span.BookPageMetadataSection__genreButton a.Button")
+        book_details['category'] = ', '.join([category.text.strip() for category in categories])
+    except AttributeError:
+        book_details['category'] = None
 
-                return {
-                    "isbn": isbn,
-                    "authors": author,
-                    "rating_goodreads": rating,
-                    "language_code": language,
-                    "num_pages": num_pages,
-                    "publication_date": publication_date,
-                    "publisher": publisher,
-                    "category": category
-                }
-    print(f"No data found for ISBN: {isbn}")  # Logowanie, jeśli brak danych
-    return None  # Jeśli książka nie została znaleziona
+    # Pobierz liczbę stron
+    try:
+        num_pages_text = soup.select_one('p[data-testid="pagesFormat"]').text.strip().split()[0]
+        # Sprawdzamy, czy liczba stron jest poprawną liczbą całkowitą
+        try:
+            book_details['num_pages'] = int(float(num_pages_text))  # Konwertujemy na int
+        except ValueError:
+            book_details['num_pages'] = None  # Jeśli nie można sparsować, ustawiamy NaN lub None
+    except AttributeError:
+        book_details['num_pages'] = None
 
+    # Pobierz datę publikacji i wydawnictwo
+    try:
+        publication_info = soup.select_one('p[data-testid="publicationInfo"]').text.strip()
 
-# Funkcja do uzupełniania brakujących danych w CSV za pomocą wątków
-def update_books_with_scraper(df):
-    print("Starting to update books with missing data...")
+        # Używamy wyrażenia regularnego do usunięcia słów przed datą, np. "First published" lub "Published"
+        publication_date = re.sub(r'^(First published|Published)\s+', '', publication_info)
 
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        # Filtrujemy książki, które mają puste dane w wymaganych kolumnach
-        missing_data_books = df[df['rating_goodreads'].isna() | df['authors'].isna() | df['publication_date'].isna()]
+        # Pobieramy tylko rok z daty publikacji (np. "2002")
+        year_match = re.search(r'\b\d{4}\b', publication_date)
+        if year_match:
+            book_details['publication_date'] = int(year_match.group())  # Przekształcamy rok na int
+        else:
+            book_details['publication_date'] = None
 
-        print(f"Found {len(missing_data_books)} books with missing data. Starting scraping process.")
+        # Wydawnictwo
+        book_details['publisher'] = publication_info.split('by')[-1].strip() if 'by' in publication_info else None
+    except AttributeError:
+        book_details['publication_date'] = book_details['publisher'] = None
 
-        # Tworzymy zadania do równoległego wykonania tylko dla książek, które wymagają uzupełnienia danych
-        future_to_isbn = {executor.submit(get_goodreads_data, isbn): isbn for isbn in missing_data_books['isbn']}
+    # Pobierz język
+    try:
+        language_tag = soup.select_one("dt:contains('Language') + dd div.TruncatedContent__text")
+        book_details['language'] = language_tag.text.strip() if language_tag else None
+    except AttributeError:
+        book_details['language'] = None
 
-        for future in as_completed(future_to_isbn):
-            isbn = future_to_isbn[future]
-            try:
-                # Przed scrapowaniem wyświetlamy dane książki
-                old_data = df.loc[df['isbn'] == isbn]
-                print(f"Before scraping (ISBN: {isbn}):\n{old_data[['isbn', 'title', 'authors', 'rating_goodreads', 'publication_date']]}")
-
-                scraped_data = future.result()
-                if scraped_data:
-                    # Logowanie przed zapisaniem do DataFrame
-                    print(f"Scraping result for ISBN {isbn}: {scraped_data}")
-
-                    # Zaktualizowanie danych w df
-                    df.loc[df['isbn'] == isbn, 'rating_goodreads'] = scraped_data.get("rating_goodreads", np.nan)
-                    df.loc[df['isbn'] == isbn, 'publication_date'] = scraped_data.get("publication_date", np.nan)
-                    df.loc[df['isbn'] == isbn, 'authors'] = scraped_data.get("author", np.nan)
-                    df.loc[df['isbn'] == isbn, 'title'] = scraped_data.get("title", np.nan)
-                    df.loc[df['isbn'] == isbn, 'language_code'] = scraped_data.get("language_code", np.nan)
-                    df.loc[df['isbn'] == isbn, 'num_pages'] = scraped_data.get("num_pages", np.nan)
-                    df.loc[df['isbn'] == isbn, 'publisher'] = scraped_data.get("publisher", np.nan)
-                    df.loc[df['isbn'] == isbn, 'category'] = scraped_data.get("category", np.nan)
-
-                    # Po scrapowaniu wyświetlamy zaktualizowane dane książki
-                    new_data = df.loc[df['isbn'] == isbn]
-                    print(f"After scraping (ISBN: {isbn}):\n{new_data[['isbn', 'title', 'authors', 'rating_goodreads', 'publication_date']]}")
-
-                else:
-                    print(f"No data found for ISBN {isbn}.")
-
-            except Exception as e:
-                print(f"Error processing ISBN {isbn}: {e}")
-
-            # Losowe opóźnienie po każdej operacji
-            time.sleep(random.uniform(1, 2))
-
-    return df
+    driver.quit()
+    return book_details
 
 
 # Wczytanie pliku CSV
-csv_path = "../databases/bookstest.csv"
-books_df = pd.read_csv(csv_path)
+df = pd.read_csv('../databases/bookstest.csv', dtype={'isbn': str})  # Upewniamy się, że ISBN jest traktowane jako string
 
-# Zaktualizowanie danych za pomocą scrappera
-updated_books_df = update_books_with_scraper(books_df)
 
-# Zapisanie zaktualizowanego pliku CSV
-updated_books_df.to_csv("../databases/bookstest_final_updated.csv", index=False)
-print("Zaktualizowano brakujące dane za pomocą scrappera!")
+# Funkcja do uzupełniania brakujących danych i wypisania wyników na terminalu
+def fill_missing_data(row):
+    # Upewnij się, że ISBN jest traktowane jako ciąg znaków, w tym początkowe 0
+    isbn = str(row['isbn']).zfill(10)  # ISBN jest teraz ciągiem znaków, zachowujemy początkowe zera
+    print(f"Pobieranie danych dla ISBN: {isbn}")
+    book_details = get_book_details(isbn)
+
+    # Uzupełnianie brakujących danych w kolumnach
+    if pd.isna(row['authors']) and book_details['authors']:
+        row['authors'] = book_details['authors']
+    if pd.isna(row['rating_goodreads']) and book_details['rating_goodreads']:
+        row['rating_goodreads'] = book_details['rating_goodreads']
+    if pd.isna(row['language']) and book_details['language']:
+        row['language'] = book_details['language']
+    if pd.isna(row['num_pages']) and book_details['num_pages']:
+        row['num_pages'] = book_details['num_pages']
+    if pd.isna(row['publication_date']) and book_details['publication_date']:
+        row['publication_date'] = book_details['publication_date']
+    if pd.isna(row['publisher']) and book_details['publisher']:
+        row['publisher'] = book_details['publisher']
+    if pd.isna(row['category']) and book_details['category']:
+        row['category'] = book_details['category']
+
+    # Wypisywanie danych na terminalu
+    print(f"ISBN: {row['isbn']}")
+    print(f"Title: {row['title']}")
+    print(f"Authors: {row['authors']}")
+    print(f"Goodreads Rating: {row['rating_goodreads']}")
+    print(f"Language: {row['language']}")
+    print(f"Number of Pages: {row['num_pages']}")
+    print(f"Publication Date: {row['publication_date']}")
+    print(f"Publisher: {row['publisher']}")
+    print(f"Category: {row['category']}")
+    print("=" * 50)
+
+    return row
+
+
+# Uzupełnianie danych w całym DataFrame
+df = df.apply(fill_missing_data, axis=1)
+
+# Konwersja do liczb, z NaN jeśli nie parsowalne
+df['publication_date'] = pd.to_numeric(df['publication_date'], errors='coerce')
+df['num_pages'] = pd.to_numeric(df['num_pages'], errors='coerce')
+
+# Konwersja do typu Int64 (nullable int), żeby nie było .0 w CSV
+df['publication_date'] = df['publication_date'].astype('Int64')
+df['num_pages'] = df['num_pages'].astype('Int64')
+
+# ISBN jako string (dla zer z przodu)
+df['isbn'] = df['isbn'].astype(str)
+
+# Zapis do pliku CSV
+df.to_csv('../databases/bookstest_final_updated.csv', index=False)
+
+print("Dane zostały zapisane do pliku 'bookstest_final_updated.csv'.")

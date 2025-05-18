@@ -9,23 +9,63 @@ class Neo4jBooksImporter:
     def close(self):
         self.driver.close()
 
-    def import_books(self, csv_file):
-        # Read CSV file
-        df = pd.read_csv(csv_file)
-
-        # Clean up and process each book
+    def clear_database(self, delete_constraints=True):
         with self.driver.session() as session:
-            # Create constraints for unique nodes (if they don't exist)
-            self._create_constraints(session)
+            session.run("MATCH (n) DETACH DELETE n")
+            print("Wszystkie węzły i relacje zostały usunięte.")
 
-            # Process each book row
-            for _, row in df.iterrows():
-                self._process_book(session, row)
+            if delete_constraints:
+                result = session.run("SHOW CONSTRAINTS")
+                constraints = [record["name"] for record in result]
 
-        print(f"Imported {len(df)} books into Neo4j")
+                for constraint in constraints:
+                    try:
+                        session.run(f"DROP CONSTRAINT {constraint}")
+                    except Exception as e:
+                        print(f"Błąd podczas usuwania ograniczenia {constraint}: {e}")
+
+                print("Wszystkie ograniczenia zostały usunięte.")
+
+    def import_books(self, csv_file):
+        try:
+            df = pd.read_csv(csv_file, encoding='utf-8')
+            print(f"Wczytano plik CSV: {csv_file}")
+            print(f"Liczba wierszy: {len(df)}")
+            print(f"Kolumny: {', '.join(df.columns)}")
+
+            required_columns = ['isbn', 'title']
+            missing_columns = [col for col in required_columns if col not in df.columns]
+            if missing_columns:
+                raise ValueError(f"Brakujące wymagane kolumny w pliku CSV: {', '.join(missing_columns)}")
+
+            with self.driver.session() as session:
+                self._create_constraints(session)
+
+                imported_count = 0
+                error_count = 0
+                for _, row in df.iterrows():
+                    try:
+                        self._process_book(session, row)
+                        imported_count += 1
+                    except Exception as e:
+                        error_count += 1
+                        print(f"Błąd podczas przetwarzania książki: {e}")
+
+                        try:
+                            isbn = row.get('isbn', 'Nieznany')
+                            print(f"Problematyczny ISBN: {isbn}")
+                        except:
+                            pass
+
+            print(f"Zaimportowano {imported_count} książek do Neo4j")
+            if error_count > 0:
+                print(f"Wystąpiło {error_count} błędów podczas importu")
+
+        except Exception as e:
+            print(f"Błąd podczas importu książek: {e}")
+            raise
 
     def _create_constraints(self, session):
-        # Create constraints to ensure uniqueness
         constraints = [
             "CREATE CONSTRAINT IF NOT EXISTS FOR (b:Book) REQUIRE b.isbn IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (a:Author) REQUIRE a.name IS UNIQUE",
@@ -39,84 +79,137 @@ class Neo4jBooksImporter:
             try:
                 session.run(constraint)
             except Exception as e:
-                print(f"Constraint creation issue: {e}")
+                print(f"Problem przy tworzeniu ograniczenia: {e}")
 
     def _process_book(self, session, row):
-        # Extract data from row
-        isbn = str(row['isbn'])
-        title = row['title']
+        try:
+            isbn = str(row['isbn']).strip()
+            if pd.isna(isbn) or isbn == '' or isbn == 'nan':
+                isbn = f"unknown_{hash(str(row))}"
+                print(f"Ostrzeżenie: Znaleziono książkę bez ISBN. Wygenerowano ID: {isbn}")
 
-        # Handle potential missing/NaN values
+            title = str(row['title']).strip() if not pd.isna(row['title']) else "Nieznany tytuł"
+        except Exception as e:
+            raise ValueError(f"Błąd podczas przetwarzania podstawowych danych książki: {e}")
+
         publisher = row.get('publisher', '')
-        if pd.isna(publisher):
-            publisher = 'Unknown'
-
-        # Handle publication year
-        pub_date = row.get('publication_date', '')
-        if pd.isna(pub_date):
-            year = 'Unknown'
+        if pd.isna(publisher) or publisher == '':
+            publisher = 'Nieznany'
         else:
-            year = str(pub_date)
+            publisher = str(publisher).strip()
 
-        # Handle language
+        pub_date = row.get('publication_date', '')
+        if pd.isna(pub_date) or pub_date == '':
+            year = 'Nieznany'
+        else:
+            try:
+                year = str(int(pub_date))
+            except:
+                year = str(pub_date).strip()
+
         language = row.get('language', '')
-        if pd.isna(language):
-            language = 'Unknown'
+        if pd.isna(language) or language == '':
+            language = 'Nieznany'
+        else:
+            language = str(language).strip()
 
-        # Create Book node
+        try:
+            num_pages = int(row.get('num_pages', 0)) if not pd.isna(row.get('num_pages', 0)) else 0
+        except:
+            num_pages = 0
+
+        try:
+            rating_goodreads = float(row.get('rating_goodreads', 0)) if not pd.isna(
+                row.get('rating_goodreads', 0)) else None
+            rating_amazon = float(row.get('rating_amazon', 0)) if not pd.isna(row.get('rating_amazon', 0)) else None
+            rating_google = float(row.get('rating_google', 0)) if not pd.isna(row.get('rating_google', 0)) else None
+        except Exception as e:
+            print(f"Ostrzeżenie: Problem z konwersją ocen dla ISBN {isbn}: {e}")
+            rating_goodreads = None
+            rating_amazon = None
+            rating_google = None
+
         book_query = """
         MERGE (b:Book {isbn: $isbn})
-        SET b.title = $title
-        RETURN b
+        SET b.title = $title,
+            b.num_pages = $num_pages
         """
-        session.run(book_query, isbn=isbn, title=title)
 
-        # Create Publisher node and relationship
-        if publisher and publisher != 'Unknown':
-            publisher_query = """
-            MERGE (p:Publisher {name: $publisher})
-            WITH p
-            MATCH (b:Book {isbn: $isbn})
-            MERGE (b)-[:PUBLISHED_BY]->(p)
-            """
-            session.run(publisher_query, publisher=publisher, isbn=isbn)
+        params = {
+            "isbn": isbn,
+            "title": title,
+            "num_pages": num_pages
+        }
 
-        # Create Year node and relationship
-        if year and year != 'Unknown':
-            year_query = """
-            MERGE (y:Year {year: $year})
-            WITH y
-            MATCH (b:Book {isbn: $isbn})
-            MERGE (b)-[:PUBLISHED_IN]->(y)
-            """
-            session.run(year_query, year=year, isbn=isbn)
+        if rating_goodreads is not None:
+            book_query += ", b.rating_goodreads = $rating_goodreads"
+            params["rating_goodreads"] = rating_goodreads
 
-        # Create Language node and relationship
-        if language and language != 'Unknown':
-            language_query = """
-            MERGE (l:Language {name: $language})
-            WITH l
-            MATCH (b:Book {isbn: $isbn})
-            MERGE (b)-[:WRITTEN_IN]->(l)
-            """
-            session.run(language_query, language=language, isbn=isbn)
+        if rating_amazon is not None:
+            book_query += ", b.rating_amazon = $rating_amazon"
+            params["rating_amazon"] = rating_amazon
 
-        # Process authors - FIXED to handle multiple authors correctly
+        if rating_google is not None:
+            book_query += ", b.rating_google = $rating_google"
+            params["rating_google"] = rating_google
+
+        book_query += " RETURN b"
+
+        try:
+            session.run(book_query, **params)
+        except Exception as e:
+            raise ValueError(f"Błąd podczas tworzenia węzła Book: {e}")
+
+        if publisher and publisher != 'Nieznany':
+            try:
+                publisher_query = """
+                MERGE (p:Publisher {name: $publisher})
+                WITH p
+                MATCH (b:Book {isbn: $isbn})
+                MERGE (b)-[:PUBLISHED_BY]->(p)
+                """
+                session.run(publisher_query, publisher=publisher, isbn=isbn)
+            except Exception as e:
+                print(f"Ostrzeżenie: Problem z przetwarzaniem wydawcy dla ISBN {isbn}: {e}")
+
+        if year and year != 'Nieznany':
+            try:
+                year_query = """
+                MERGE (y:Year {year: $year})
+                WITH y
+                MATCH (b:Book {isbn: $isbn})
+                MERGE (b)-[:PUBLISHED_IN]->(y)
+                """
+                session.run(year_query, year=year, isbn=isbn)
+            except Exception as e:
+                print(f"Ostrzeżenie: Problem z przetwarzaniem roku dla ISBN {isbn}: {e}")
+
+        if language and language != 'Nieznany':
+            try:
+                language_query = """
+                MERGE (l:Language {name: $language})
+                WITH l
+                MATCH (b:Book {isbn: $isbn})
+                MERGE (b)-[:WRITTEN_IN]->(l)
+                """
+                session.run(language_query, language=language, isbn=isbn)
+            except Exception as e:
+                print(f"Ostrzeżenie: Problem z przetwarzaniem języka dla ISBN {isbn}: {e}")
+
         authors_raw = row.get('authors', '')
-        if not pd.isna(authors_raw):
-            # Parse authors properly
-            if authors_raw.startswith('"') and authors_raw.endswith('"'):
-                # This is a quoted string with multiple authors
-                authors_content = authors_raw[1:-1]  # Remove outer quotes
-            else:
-                # Single author or already processed string
-                authors_content = authors_raw
+        if not pd.isna(authors_raw) and authors_raw != '':
+            try:
+                if isinstance(authors_raw, str) and authors_raw.startswith('"') and authors_raw.endswith('"'):
+                    authors_content = authors_raw[1:-1]
+                else:
+                    authors_content = str(authors_raw)
 
-            # Split by comma and handle each author individually
-            author_list = [a.strip() for a in authors_content.split(',')]
+                author_list = [a.strip() for a in authors_content.split(',')]
 
-            for author in author_list:
-                if author:  # Ensure we don't add empty authors
+                for author in author_list:
+                    if not author or author == 'nan':
+                        continue
+
                     author_query = """
                     MERGE (a:Author {name: $author})
                     WITH a
@@ -124,15 +217,18 @@ class Neo4jBooksImporter:
                     MERGE (b)-[:WRITTEN_BY]->(a)
                     """
                     session.run(author_query, author=author, isbn=isbn)
+            except Exception as e:
+                print(f"Ostrzeżenie: Problem z przetwarzaniem autorów dla ISBN {isbn}: {e}")
 
-        # Process genres/categories - FIXED to handle properly
         categories = row.get('category', '')
-        if not pd.isna(categories):
-            # Split categories by comma
-            genre_list = [g.strip() for g in categories.split(',')]
+        if not pd.isna(categories) and categories != '':
+            try:
+                genre_list = [g.strip() for g in str(categories).split(',')]
 
-            for genre in genre_list:
-                if genre:  # Ensure we don't add empty genres
+                for genre in genre_list:
+                    if not genre or genre == 'nan':
+                        continue
+
                     genre_query = """
                     MERGE (g:Genre {name: $genre})
                     WITH g
@@ -140,11 +236,12 @@ class Neo4jBooksImporter:
                     MERGE (b)-[:BELONGS_TO]->(g)
                     """
                     session.run(genre_query, genre=genre, isbn=isbn)
+            except Exception as e:
+                print(f"Ostrzeżenie: Problem z przetwarzaniem kategorii dla ISBN {isbn}: {e}")
 
 
 # Usage example
 if __name__ == "__main__":
-    # Replace with your Neo4j connection details
     uri = "neo4j://localhost:7687"
     username = "neo4j"
     password = "password"
@@ -152,6 +249,6 @@ if __name__ == "__main__":
     importer = Neo4jBooksImporter(uri, username, password)
 
     try:
-        importer.import_books("bookstest_final_updated.csv")
+        importer.import_books("../databases/Books1KPlus.csv")
     finally:
         importer.close()
