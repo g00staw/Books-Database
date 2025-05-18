@@ -9,9 +9,8 @@ import pandas as pd
 import re
 
 
-# Funkcja do pobrania i parsowania strony książki na Goodreads (używając Selenium)
 def get_book_details(isbn):
-    url = f'https://www.goodreads.com/search?q={isbn}'  # Poprawny URL dla książki na Goodreads
+    url = f'https://www.goodreads.com/search?q={isbn}'
 
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()))
     driver.get(url)
@@ -32,7 +31,7 @@ def get_book_details(isbn):
     try:
         details_button = driver.find_element(By.CSS_SELECTOR, "button[aria-label='Book details and editions']")
         details_button.click()
-        time.sleep(2)  # Poczekaj, aż szczegóły się załadują
+        time.sleep(2)
     except:
         print("Nie udało się kliknąć przycisku 'Book details & editions'.")
 
@@ -64,11 +63,10 @@ def get_book_details(isbn):
     # Pobierz liczbę stron
     try:
         num_pages_text = soup.select_one('p[data-testid="pagesFormat"]').text.strip().split()[0]
-        # Sprawdzamy, czy liczba stron jest poprawną liczbą całkowitą
         try:
-            book_details['num_pages'] = int(float(num_pages_text))  # Konwertujemy na int
+            book_details['num_pages'] = int(float(num_pages_text))
         except ValueError:
-            book_details['num_pages'] = None  # Jeśli nie można sparsować, ustawiamy NaN lub None
+            book_details['num_pages'] = None
     except AttributeError:
         book_details['num_pages'] = None
 
@@ -76,13 +74,11 @@ def get_book_details(isbn):
     try:
         publication_info = soup.select_one('p[data-testid="publicationInfo"]').text.strip()
 
-        # Używamy wyrażenia regularnego do usunięcia słów przed datą, np. "First published" lub "Published"
         publication_date = re.sub(r'^(First published|Published)\s+', '', publication_info)
 
-        # Pobieramy tylko rok z daty publikacji (np. "2002")
         year_match = re.search(r'\b\d{4}\b', publication_date)
         if year_match:
-            book_details['publication_date'] = int(year_match.group())  # Przekształcamy rok na int
+            book_details['publication_date'] = int(year_match.group())
         else:
             book_details['publication_date'] = None
 
@@ -103,13 +99,12 @@ def get_book_details(isbn):
 
 
 # Wczytanie pliku CSV
-df = pd.read_csv('../databases/bookstest.csv', dtype={'isbn': str})  # Upewniamy się, że ISBN jest traktowane jako string
+df = pd.read_csv('../databases/bookstest.csv', dtype={'isbn': str})
 
 
 # Funkcja do uzupełniania brakujących danych i wypisania wyników na terminalu
 def fill_missing_data(row):
-    # Upewnij się, że ISBN jest traktowane jako ciąg znaków, w tym początkowe 0
-    isbn = str(row['isbn']).zfill(10)  # ISBN jest teraz ciągiem znaków, zachowujemy początkowe zera
+    isbn = str(row['isbn']).zfill(10)
     print(f"Pobieranie danych dla ISBN: {isbn}")
     book_details = get_book_details(isbn)
 

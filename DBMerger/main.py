@@ -118,21 +118,17 @@ final_books["rating_amazon"] = final_books["rating_amazon"].round(2)
 final_books["rating_google"] = final_books["rating_google"].round(2)
 
 # 🔐 Zapis z pełnym quotingiem tekstu
-# Naprawiamy typy: bez ".0" w liczbach
 final_books["publication_date"] = final_books["publication_date"].astype("Int64")
 final_books["num_pages"] = final_books["num_pages"].astype("Int64")
 
-# Zamień pustą kategorię na pusty string BEZ cudzysłowu
 final_books["category"] = final_books["category"].replace("", pd.NA).fillna("")
 
-# Tylko wybrane kolumny tekstowe mają być w cudzysłowie
-# CSV bez automatycznego quotingowania
 final_books.to_csv(
     "../databases/merged_books_final.csv",
     index=False,
-    quoting=csv.QUOTE_MINIMAL,  # tylko jeśli musowo
+    quoting=csv.QUOTE_MINIMAL,
     quotechar='"',
-    na_rep='',  # brak wartości = pusto
+    na_rep='',
     doublequote=True
 )
-print("Zapisano finalny plik: merged_books_final.csv (bez zbędnych cudzysłowów)")
+print("Zapisano finalny plik: merged_books_final.csv")
