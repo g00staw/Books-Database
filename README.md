@@ -98,13 +98,11 @@ Skrypt odpowiedzialny za import danych do bazy Neo4j i utworzenie struktury graf
   - Book (Książka)
   - Author (Autor)
   - Publisher (Wydawca)
-  - Year (Rok publikacji)
   - Language (Język)
   - Genre (Gatunek)
 - Tworzenie relacji między węzłami:
   - WRITTEN_BY (Napisane przez)
   - PUBLISHED_BY (Wydane przez)
-  - PUBLISHED_IN (Wydane w roku)
   - WRITTEN_IN (Napisane w języku)
   - BELONGS_TO (Należy do gatunku)
 
@@ -114,14 +112,12 @@ Skrypt odpowiedzialny za import danych do bazy Neo4j i utworzenie struktury graf
 - **Book**: zawiera informacje o książce (ISBN, tytuł)
 - **Author**: zawiera informacje o autorze (imię i nazwisko)
 - **Publisher**: zawiera informacje o wydawcy (nazwa)
-- **Year**: zawiera rok publikacji
 - **Language**: zawiera język, w którym napisana jest książka
 - **Genre**: zawiera gatunek/kategorię książki
 
 ### Relacje
 - **WRITTEN_BY**: łączy książkę z autorem
 - **PUBLISHED_BY**: łączy książkę z wydawcą
-- **PUBLISHED_IN**: łączy książkę z rokiem publikacji
 - **WRITTEN_IN**: łączy książkę z językiem
 - **BELONGS_TO**: łączy książkę z gatunkiem
 
@@ -136,12 +132,6 @@ Skrypt odpowiedzialny za import danych do bazy Neo4j i utworzenie struktury graf
                      v
 (Genre) <--- BELONGS_TO --- (Book) --- PUBLISHED_BY ---> (Publisher)
                              |
-                             |
-                      PUBLISHED_IN
-                             |
-                             v
-                          (Year)
-                             ^
                              |
                        WRITTEN_IN
                              |
