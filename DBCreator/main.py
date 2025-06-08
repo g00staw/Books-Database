@@ -70,7 +70,6 @@ class Neo4jBooksImporter:
             "CREATE CONSTRAINT IF NOT EXISTS FOR (b:Book) REQUIRE b.isbn IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (a:Author) REQUIRE a.name IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (p:Publisher) REQUIRE p.name IS UNIQUE",
-            "CREATE CONSTRAINT IF NOT EXISTS FOR (y:Year) REQUIRE y.year IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (l:Language) REQUIRE l.name IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (g:Genre) REQUIRE g.name IS UNIQUE"
         ]
@@ -99,13 +98,14 @@ class Neo4jBooksImporter:
             publisher = str(publisher).strip()
 
         pub_date = row.get('publication_date', '')
-        if pd.isna(pub_date) or pub_date == '':
-            year = 'Nieznany'
-        else:
+        year = None
+        if not pd.isna(pub_date) and pub_date != '':
             try:
-                year = str(int(pub_date))
-            except:
-                year = str(pub_date).strip()
+                year = int(float(pub_date))
+            except (ValueError, TypeError):
+                print(
+                    f"Ostrzeżenie: Nie można przekonwertować roku '{pub_date}' na liczbę dla ISBN {isbn}. Rok nie zostanie dodany.")
+                year = None
 
         language = row.get('language', '')
         if pd.isna(language) or language == '':
@@ -141,6 +141,10 @@ class Neo4jBooksImporter:
             "num_pages": num_pages
         }
 
+        if year is not None:
+            book_query += ", b.publication_year = $year"
+            params["year"] = year
+
         if rating_goodreads is not None:
             book_query += ", b.rating_goodreads = $rating_goodreads"
             params["rating_goodreads"] = rating_goodreads
@@ -171,18 +175,6 @@ class Neo4jBooksImporter:
                 session.run(publisher_query, publisher=publisher, isbn=isbn)
             except Exception as e:
                 print(f"Ostrzeżenie: Problem z przetwarzaniem wydawcy dla ISBN {isbn}: {e}")
-
-        if year and year != 'Nieznany':
-            try:
-                year_query = """
-                MERGE (y:Year {year: $year})
-                WITH y
-                MATCH (b:Book {isbn: $isbn})
-                MERGE (b)-[:PUBLISHED_IN]->(y)
-                """
-                session.run(year_query, year=year, isbn=isbn)
-            except Exception as e:
-                print(f"Ostrzeżenie: Problem z przetwarzaniem roku dla ISBN {isbn}: {e}")
 
         if language and language != 'Nieznany':
             try:
